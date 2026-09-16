@@ -14,8 +14,8 @@ netifyd JSON sink 桥 + 极简网页面板。217 行 Go，跑在 OpenWrt aarch64
 ## ipk 安装（推荐）
 
 ```sh
-scp netify-bridge_1.0-1_aarch64_cortex_a53.ipk root@<router>:/tmp/
-ssh root@<router> 'opkg install /tmp/netify-bridge_1.0-1_aarch64_cortex_a53.ipk'
+scp netify-bridge_1.0-1_aarch64_cortex-a53.ipk root@<router>:/tmp/
+ssh root@<router> 'opkg install /tmp/netify-bridge_1.0-1_aarch64_cortex-a53.ipk'
 ssh root@<router> '/etc/init.d/netify-bridge enable && /etc/init.d/netify-bridge start'
 ```
 

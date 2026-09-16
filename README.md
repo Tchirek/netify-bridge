@@ -11,6 +11,8 @@
 
 netifyd JSON sink 桥 + 极简网页面板。217 行 Go，跑在 OpenWrt aarch64 路由器上。
 
+原项目（x86 v5）：https://download.netify.ai/source/
+
 ## ipk 安装（推荐）
 
 ```sh

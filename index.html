@@ -1,0 +1,146 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8"/>
+<meta name="viewport" content="width=device-width,initial-scale=1"/>
+<title>Netify Dashboard</title>
+<style>
+*{margin:0;padding:0;box-sizing:border-box}
+:root{--bg:#0f172a;--card:#1e293b;--accent:#06b6d4;--accent2:#8b5cf6;
+--text:#e2e8f0;--muted:#94a3b8;--border:#334155;--good:#22c55e;--warn:#f59e0b;--bad:#ef4444}
+body{background:var(--bg);color:var(--text);font:13px/1.5 system-ui,-apple-system,sans-serif;padding:16px;max-width:1400px;margin:0 auto}
+h1{font-size:20px;font-weight:700;color:var(--accent);display:inline;vertical-align:middle}
+.header{display:flex;justify-content:space-between;align-items:center;margin-bottom:16px}
+.status{font-size:12px;color:var(--muted);display:inline-flex;align-items:center;gap:6px}
+.dot{width:8px;height:8px;border-radius:50%;display:inline-block}
+.dot.ok{background:var(--good);box-shadow:0 0 6px var(--good)}.dot.err{background:var(--bad)}
+.grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(180px,1fr));gap:12px;margin-bottom:20px}
+.card{background:var(--card);border:1px solid var(--border);border-radius:10px;padding:16px}
+.card .label{font-size:11px;color:var(--muted);text-transform:uppercase;letter-spacing:.5px;margin-bottom:6px}
+.card .value{font-size:26px;font-weight:700}
+.card .value.cyan{color:var(--accent)}.card .value.purple{color:var(--accent2)}
+.card .value.green{color:var(--good)}.card .value.amber{color:var(--warn)}
+.section{background:var(--card);border:1px solid var(--border);border-radius:10px;padding:16px;margin-bottom:16px}
+.section h2{font-size:14px;font-weight:600;color:var(--accent);margin-bottom:12px;border-bottom:1px solid var(--border);padding-bottom:8px}
+table{width:100%;border-collapse:collapse}
+th{text-align:left;font-size:11px;color:var(--muted);text-transform:uppercase;letter-spacing:.5px;padding:8px 10px;border-bottom:1px solid var(--border)}
+td{padding:8px 10px;border-bottom:1px solid var(--border);font-size:12px;white-space:nowrap}
+tr:hover td{background:rgba(6,182,212,.05)}
+.tag{display:inline-block;background:rgba(6,182,212,.15);color:var(--accent);padding:2px 8px;border-radius:9999px;font-size:11px;margin:1px}
+.tag.purple{background:rgba(139,92,246,.15);color:var(--accent2)}
+.tag.green{background:rgba(34,197,94,.15);color:var(--good)}
+.mono{font-family:'SF Mono',Consolas,monospace;font-size:11px}
+.bar-wrap{margin:6px 0}
+.bar-bg{height:20px;background:var(--bg);border-radius:4px;overflow:hidden;position:relative}
+.bar-fill{height:100%;border-radius:4px;display:flex;align-items:center;padding-left:8px;font-size:11px;font-weight:600;transition:width .4s}
+.bar-label{font-size:11px;color:var(--muted);width:160px;flex-shrink:0;overflow:hidden;text-overflow:ellipsis}
+.footer{text-align:center;color:var(--muted);font-size:11px;margin-top:20px}
+</style>
+</head>
+<body>
+<div class="header">
+  <div><h1>Netify Dashboard</h1></div>
+  <div class="status"><span class="dot" id="dot"></span><span id="statusText">connecting...</span></div>
+</div>
+<div class="grid" id="cards">
+  <div class="card"><div class="label">Devices</div><div class="value cyan" id="cDev">-</div></div>
+  <div class="card"><div class="label">Flows</div><div class="value purple" id="cFlow">-</div></div>
+  <div class="card"><div class="label">Volume</div><div class="value amber" id="cBytes">-</div></div>
+  <div class="card"><div class="label">Detected Apps</div><div class="value green" id="cKnown">-</div></div>
+</div>
+<div class="section">
+  <h2>Application Traffic</h2>
+  <div id="appBars"></div>
+</div>
+<div class="section">
+  <h2>Devices</h2>
+  <div style="overflow-x:auto">
+  <table>
+    <thead><tr><th>IP</th><th>MAC</th><th>Top App</th><th>Host / SNI</th><th>Flows</th><th>Bytes</th><th>Last Seen</th></tr></thead>
+    <tbody id="devBody"><tr><td colspan="7" style="color:var(--muted)">Waiting for data...</td></tr></tbody>
+  </table>
+  </div>
+</div>
+<div class="section">
+  <h2>Recent Flows</h2>
+  <div style="overflow-x:auto">
+  <table>
+    <thead><tr><th>Client</th><th>Server</th><th>App</th><th>Proto</th><th>SNI / Host</th><th>Bytes</th><th>Time</th></tr></thead>
+    <tbody id="flowBody"><tr><td colspan="7" style="color:var(--muted)">Waiting for data...</td></tr></tbody>
+  </table>
+  </div>
+</div>
+<div class="footer">Netify Bridge &middot; Live DPI from netifyd (nfq-lan)</div>
+
+<script>
+const P=b=>{if(!b)return'0 B';if(b>=1e12)return(b/1e12).toFixed(1)+' TB';if(b>=1e9)return(b/1e9).toFixed(1)+' GB';if(b>=1e6)return(b/1e6).toFixed(1)+' MB';if(b>=1e3)return(b/1e3).toFixed(1)+' KB';return b+' B'};
+const T=s=>{const n=new Date(s*1000);return isNaN(n)?'-':n.toLocaleTimeString()};
+const esc=v=>{const d=document.createElement('div');d.textContent=v==null?'':String(v);return d.innerHTML};
+
+async function poll(){
+  try{
+    const [sr,dr,fr]=await Promise.all([fetch('/api/stats'),fetch('/api/devices'),fetch('/api/flows?limit=60')]);
+    if(!sr.ok||!dr.ok)throw new Error('resp not ok');
+    const s=await sr.json(),d=await dr.json(),f=await fr.json();
+    document.getElementById('dot').className='dot ok';
+    document.getElementById('statusText').textContent='live ' + new Date().toLocaleTimeString();
+    document.getElementById('cDev').textContent=s.devices_count||0;
+    document.getElementById('cFlow').textContent=s.total_flows||0;
+    document.getElementById('cBytes').textContent=P(s.total_bytes||0);
+    let known=Object.keys(s.apps||{}).filter(k=>k!=='Unknown').length;
+    document.getElementById('cKnown').textContent=known;
+    const apps=Object.entries(s.apps||{}).map(([k,v])=>({name:v.name||k,flows:v.flows||0})).sort((a,b)=>b.flows-a.flows);
+    const max=apps[0]?apps[0].flows:1;
+    const colors=['var(--accent)','var(--accent2)','var(--good)','var(--warn)','#ec4899','#f97316'];
+    let ab='';
+    apps.slice(0,12).forEach((a,i)=>{
+      const pct=Math.min(100,Math.round(a.flows/max*100));
+      ab+='<div class="bar-wrap" style="display:flex;align-items:center;gap:8px"><div class="bar-label" title="'+esc(a.name)+'">'+esc(a.name)+'</div><div class="bar-bg" style="flex:1"><div class="bar-fill" style="width:'+pct+'%;background:'+colors[i%colors.length]+'">'+a.flows+'</div></div></div>';
+    });
+    if(!apps.length)ab='<div style="color:var(--muted);font-size:12px">No data yet</div>';
+    document.getElementById('appBars').innerHTML=ab;
+    let dh='';
+    d.slice().sort((a,b)=>(b.last_seen||0)-(a.last_seen||0)).forEach(x=>{
+      const appsObj=Object.entries(x.apps||{}).sort((a,b)=>b[1]-a[1]);
+      const topApp=appsObj[0]?appsObj[0][0]:'-';
+      const tagCls=topApp!=='Unknown'?'tag':'';
+      dh+='<tr>'+
+        '<td class="mono">'+esc(x.ip||'-')+'</td>'+
+        '<td class="mono">'+esc(x.mac||'-')+'</td>'+
+        '<td>'+(topApp==='Unknown'?'<span style="color:var(--muted)">Unknown</span>':'<span class="'+tagCls+'">'+esc(topApp)+'</span>')+'</td>'+
+        '<td class="mono">'+esc(x.last_host||'-')+'</td>'+
+        '<td>'+x.count+'</td>'+
+        '<td>'+P(x.bytes)+'</td>'+
+        '<td style="color:var(--muted)">'+T(x.last_seen)+'</td></tr>';
+    });
+    if(!dh)dh='<tr><td colspan="7" style="color:var(--muted)">No data yet</td></tr>';
+    document.getElementById('devBody').innerHTML=dh;
+    let fh='';
+    Array.isArray(f)&&f.slice().reverse().forEach(x=>{
+      const fl=x.flow||{};
+      const appN=fl.detected_application_name||'Unknown';
+      const proto=fl.detected_protocol_name||'-';
+      const hostOrSni=fl.client_sni||fl.host_server_name||'-';
+      const appCls=appN!=='Unknown'?'tag':'tag purple';
+      const tSec=fl.last_seen_at?fl.last_seen_at/1000:null;
+      fh+='<tr>'+
+        '<td class="mono">'+esc(fl.local_ip||'-')+(fl.local_port?':'+fl.local_port:'')+'</td>'+
+        '<td class="mono">'+esc(fl.other_ip||'-')+'</td>'+
+        '<td><span class="'+appCls+'">'+esc(appN)+'</span></td>'+
+        '<td>'+esc(proto)+'</td>'+
+        '<td class="mono">'+esc(hostOrSni)+'</td>'+
+        '<td>'+P((fl.local_bytes||0)+(fl.other_bytes||0))+'</td>'+
+        '<td style="color:var(--muted)">'+T(tSec)+'</td></tr>';
+    });
+    if(!fh)fh='<tr><td colspan="7" style="color:var(--muted)">No data yet</td></tr>';
+    document.getElementById('flowBody').innerHTML=fh;
+  }catch(e){
+    document.getElementById('dot').className='dot err';
+    document.getElementById('statusText').textContent='offline';
+  }
+}
+setInterval(poll,2000);
+poll();
+</script>
+</body>
+</html>
